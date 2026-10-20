@@ -1,5 +1,12 @@
 # 09 · RL 生成全过程（白话完整版）
 
+| | |
+|---|---|
+| **读这篇前** | [04 SFT](./04-sft.md)；建议先读过 [05 RL](./05-rl.md) 的前两节 |
+| **读完能回答** | 一条训练样本怎么变成 16 个候选？beam 排序、reward、advantage、loss 是按什么顺序算的？ |
+| **对应源码** | `rl.py`、`minionerec_trainer.py`、`LogitProcessor.py` |
+| **预计耗时** | 45 分钟 |
+
 > 这一篇只讲一件事：**RL 阶段一条「结果」是怎么被生成出来的。**
 > 从数据集里的一行，到模型吐出 16 个候选，再到 reward、advantage、loss。
 > 尽量不用公式，需要精确时再给形状和代码位置。
@@ -398,3 +405,13 @@ test_generation_config = GenerationConfig(
 | reward | `rl.py:186` 起 |
 | advantage | `minionerec_trainer.py:966` |
 | loss | `minionerec_trainer.py:1035` |
+
+---
+
+## 相关章节
+
+| 想做的事 | 去哪 |
+|---|---|
+| 把这条链路真的跑一遍（参数、显存、排错） | [11 实操手册](./11-hands-on.md) |
+| 看 GRPO 的公式与张量推导 | [05 RL](./05-rl.md) |
+| 换一套 SID 后哪些东西会变 | [10 §7](./10-sid-generators.md) |

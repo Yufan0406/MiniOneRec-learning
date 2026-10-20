@@ -1,9 +1,17 @@
 # 03 · SID 构建：RQ-VAE、RQ-KMeans 与冲突处理
 
+| | |
+|---|---|
+| **读这篇前** | [02 数据管线](./02-data-pipeline.md)（知道 `.npy` / `.item.json` / `.index.json` 的关系） |
+| **读完能回答** | 残差量化在做什么？四种老方法差在哪？0-based / 1-based 为什么容易错？冲突率怎么算？ |
+| **对应源码** | `rq/` 目录（`rqvae.py`、`rqkmeans_faiss.py`、`rqkmeans_constrained.py`、`rqkmeans_plus.py`、`generate_indices*.py`） |
+| **预计耗时** | 精读 90 分钟；做 §7 的练习另加 40 分钟 |
+
 > 目标：把 `(N, d)` 的 item 文本 embedding 变成 `(N, L)` 的离散码，
 > 再变成 token 字符串 `<a_i><b_j><c_k>`。
 >
-> 对应源码：`rq/` 目录。
+> **上游新增的三种 SID 构造方法**（FLASH-SimHash、PRQ-KMeans、RQ-OPQ）
+> 见 [10 新 SID 构造](./10-sid-generators.md)。本篇只讲 03 章对应的四种经典做法。
 
 ---
 
@@ -265,8 +273,10 @@ item C -> <a_42><b_80><c_160><d_3>
 `data.py` 在构造 prompt 时直接使用 `.index.json` 里的 token 列表，因此不会出错，
 但你要知道**去重后的 SID 可能比 `--num_emb_list` 的长度多一层**。
 
-> 这也是为什么源码里多处写 `if len(sids) >= 3: combined_sid = sids[0]+sids[1]+sids[2]`：
-> 它们只取前三层做语义对齐，忽略去重附加的 rank。
+> **版本注意**：2025-11 之后的代码已经改成 `if sids: combined_sid = ''.join(sids)`，
+> 即辅助任务会保留去重附加的 rank（含新算法追加的身份 token）。
+> 改动前是 `if len(sids) >= 3: sids[0]+sids[1]+sids[2]`——只取前三层，
+> 导致"标题↔SID"任务的 label 与主任务的 `item_sid` 不一致（详见 [04 §8.1](./04-sft.md)）。
 
 ### 4.4 RQ-VAE 的冲突处理：只对冲突项重新编码
 
@@ -386,12 +396,13 @@ PY
 | `e_dim must equal input dim` | RQ-KMeans+ 的残差要求维度一致 | `--e_dim 2560`（与编码器 hidden 一致） |
 | 码本加载后 loss 不降 | 热启动码本与模型维度/层数不匹配 | 检查 `.npz` 的 `codebook_i` 形状 |
 | collision rate 长期不降 | `sk_epsilons` 全 0、K 太小、文本太单一 | 增大 K 或开启 Sinkhorn |
-| 训练 prompt 里出现 `<c_257>` | 去重时 rank 超出了 K | 正常现象；但语义对齐代码只取前三层 |
+| 训练 prompt 里出现 `<c_257>` | 去重时 rank 超出了 K | 正常现象；现在辅助任务会用 `''.join(sids)` 保留它 |
 | 评估永远生成同一个 SID | 码本塌缩 / 训练不足 | 看各层 token 使用分布 |
 
 ---
 
 ## 9. 下一步
 
-SID 有了，接下来把它喂给 LLM：
-[04-sft.md](./04-sft.md)。
+- 想了解**免训练 / CPU-only** 的新 SID 构造（FLASH-SimHash、PRQ-KMeans、RQ-OPQ）→
+  [10-sid-generators.md](./10-sid-generators.md)
+- SID 有了，接下来把它喂给 LLM → [04-sft.md](./04-sft.md)

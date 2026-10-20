@@ -1,5 +1,12 @@
 # 02 · 数据管线：从 Amazon 原始数据到训练 CSV
 
+| | |
+|---|---|
+| **读这篇前** | [01 范式](./01-paradigm.md) |
+| **读完能回答** | 四类文件（`.inter` / `.npy` / `.item.json` / `.index.json`）的 item id 分别指谁？`.csv` 的 7 列怎么来的？ |
+| **对应源码** | `data/amazon18_data_process.py`、`rq/text2emb/`、`convert_dataset.py` |
+| **预计耗时** | 60 分钟 |
+
 本篇只关心一件事：**一行训练样本是怎么来的，每个字段的下标到底指向谁。**
 这是读 MiniOneRec 最容易出错的地方——`.npy`、`.item.json`、`.index.json`、`.inter`
 四份文件里的 "item id" 并不总是同一个东西。

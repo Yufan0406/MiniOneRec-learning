@@ -1,9 +1,11 @@
 # 06 · 离线评估：约束解码、HR/NDCG 与 CC
 
-> 对应源码：`evaluate.sh`、`split.py`、`evaluate.py`、`LogitProcessor.py`、`merge.py`、`calc.py`。
->
-> 目标：搞清楚 50 个 beam 是怎么生成的、为什么不会出现非法 item、
-> HR/NDCG 的精确定义，以及 `CC` 这个数字意味着什么。
+| | |
+|---|---|
+| **读这篇前** | [05 RL](./05-rl.md)（约束解码在 RL 里也用） |
+| **读完能回答** | 50 个 beam 怎么生成？为什么不会出现非法 item？HR/NDCG 的精确分母是什么？`CC` 为什么关键？ |
+| **对应源码** | `evaluate.sh`、`split.py`、`evaluate.py`、`LogitProcessor.py`、`merge.py`、`calc.py` |
+| **预计耗时** | 60 分钟 |
 
 ---
 

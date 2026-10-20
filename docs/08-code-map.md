@@ -1,5 +1,12 @@
 # 08 · 源码地图、阅读顺序与 CPU 实验
 
+| | |
+|---|---|
+| **读这篇前** | [02 数据管线](./02-data-pipeline.md)（至少知道四类文件） |
+| **读完能拿到** | 文件/函数地图、按调用链的阅读顺序、6 个 CPU 练习、FAQ、术语表、公式速查 |
+| **对应源码** | 全仓库 |
+| **预计耗时** | 先花 15 分钟看 §1–§3，其余当工具页随时查 |
+
 本篇是工具页：把关键函数按调用链串起来，给出不依赖 GPU 的练习，并集中回答常见问题。
 
 ---
@@ -37,6 +44,18 @@
 | `rq/rqkmeans_plus.py` | RQ-KMeans+（残差连接 + 热启动） |
 | `rq/generate_indices.py` | RQ-VAE → `.index.json` |
 | `rq/generate_indices_plus.py` | RQ-KMeans+ → `.index.json` |
+| `rq/generate_indices_flash.py` | FLASH-SimHash 入口（`--format minionerec` 直出 `.index.json`） |
+| `rq/flash_sid/simhash.py` | 随机超平面 → 语义码（`SimHashTokenizer.encode`） |
+| `rq/flash_sid/export.py` | 冲突统计 + 追加 `<d_rank>` 后导出 index |
+| `rq/flash_sid/cli.py` | 命令行、输入校验、manifest |
+| `sid_generation/prq_kmeans.py` | PRQ-KMeans（投影残差 + top-k 软分配） |
+| `sid_generation/rq_opq.py` | RQ-OPQ（RQ 前缀 + OPQ/PQ 子码） |
+| `sid_generation/sid_common.py` | 归一化、投影残差、`build_indexes`、NPZ 读写 |
+| `sid_generation/sid_cli.py` | `fit` / `encode` 子命令与参数 |
+| `sid_generation/sid_publish.py` | 目录级原子发布与文件清单校验 |
+
+> 新方法的原理、CLI、实测冲突率见 [10 新 SID 构造](./10-sid-generators.md)；
+> 上游自带的英文说明是 `rq/FLASH_SID.md` 与 `sid_generation/README.md`。
 
 ### 1.3 数据准备
 
@@ -293,6 +312,8 @@ Dataset 会返回这个字段，但主流程的 `calc.py` **没有**用它过滤
 - 冲突率：去重前看 collision rate，目标接近 0；
 - 成本：每多一层，SFT 多一个监督 token，RL 多一步解码；
 - 语义：层数太多会让后面几层只拟合噪声，重建误差收益递减。
+- 方法：四种经典方法的入口见 03 章；FLASH / PRQ-KMeans / RQ-OPQ 见 [10 章](./10-sid-generators.md)。
+  想要"零训练、几秒出结果"用 FLASH（但冲突率高），想要"CPU 上质量可用"用 PRQ-KMeans。
 
 ### Q7. 新增 item 怎么办？
 
@@ -301,6 +322,9 @@ Dataset 会返回这个字段，但主流程的 `calc.py` **没有**用它过滤
 3. 更新 `.index.json` 和 `info.txt`；
 4. 如果出现了新的 SID token，需要扩展 tokenizer 词表并重训/微调 embedding；
 5. **必须重建约束前缀树**，否则模型永远生成不到新 item。
+6. 注意**身份 token 的 rank 是全库重算的**：新增 item 可能改变同组其他 item 的
+   `<d_rank>`，所以不能"只追加一行 index"，必须整库重新导出
+   （见 [10 §6](./10-sid-generators.md)）。
 
 ### Q8. 为什么不直接用 LLM 生成 item 标题，再检索？
 
@@ -418,3 +442,13 @@ $$
 接下来建议做一件小事：**选一个 item，手工追踪它的 SID 从 `.npy` 到 `.index.json`
 再到一条训练样本的全过程**，并把每一步的中间值打印出来。
 这比再读十遍论文都有效。
+
+---
+
+## 10. 相关章节
+
+| 想做的事 | 去哪 |
+|---|---|
+| 真的把流水线跑起来（各阶段命令、参数、排错表） | [11 实操手册](./11-hands-on.md) |
+| 了解 FLASH / PRQ-KMeans / RQ-OPQ 三种新 SID 构造 | [10 新 SID 构造](./10-sid-generators.md) |
+| 不熟悉 SID 的命名与 0/1-based | [03 §4](./03-sid-construction.md) |

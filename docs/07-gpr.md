@@ -1,10 +1,14 @@
 # 07 · GPR 变体：异构 token、VAFT 与 HEPO
 
-> 对应源码：`data/amazon18_data_process_gpr.py`、`convert_dataset_gpr.py`、
-> `sft_gpr.py`、`rl_gpr.py`，以及 `data.py` 中的 `SidSFTDataset_GPR`。
->
+| | |
+|---|---|
+| **读这篇前** | [04 SFT](./04-sft.md)、[05 RL](./05-rl.md)（要先认识主流程） |
+| **读完能回答** | GPR 和主流程差在哪？U/E/I/O token 是什么？哪些设计接上了代码、哪些没有？ |
+| **对应源码** | `data/amazon18_data_process_gpr.py`、`convert_dataset_gpr.py`、`sft_gpr.py`、`rl_gpr.py`、`data.py` 的 `SidSFTDataset_GPR` |
+| **预计耗时** | 45 分钟（只读差异） |
+
 > 先给结论：**这是一条研究性分支，代码里既有"设计意图"，也有尚未接线的部分。**
-> 本篇会把两者分开讲清楚。
+> 本篇会把两者分开讲清楚。主流程不依赖这一章。
 
 ---
 

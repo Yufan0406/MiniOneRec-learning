@@ -1,9 +1,11 @@
 # 04 · SFT：把推荐任务改写为下一个 token 预测
 
-> 对应源码：`sft.py`、`data.py` 中的 SFT 数据集。
->
-> 读完你应该能回答：一条 CSV 样本如何变成 `input_ids / labels`？
-> 为什么 `labels` 前面全是 `-100`？新加的 SID token 是怎么进入词表的？
+| | |
+|---|---|
+| **读这篇前** | [03 SID 构建](./03-sid-construction.md)（知道 SID 是几个 token） |
+| **读完能回答** | 一条 CSV 样本如何变成 `input_ids / labels`？为什么 `labels` 前面全是 `-100`？新加的 SID token 怎么进词表？ |
+| **对应源码** | `sft.py`、`data.py` 中的 SFT 数据集 |
+| **预计耗时** | 60 分钟 |
 
 ---
 
@@ -133,8 +135,8 @@ train_data = ConcatDataset([...])
 `SidItemFeatDataset`（`data.py:678`）从 `.item.json` + `.index.json` 构建：
 
 ```python
-sid2title[sids[0] + sids[1] + sids[2]] = title
-title2sid[title] = sids[0] + sids[1] + sids[2]
+sid2title[''.join(sids)] = title
+title2sid[title] = ''.join(sids)
 ```
 
 然后为每个 item 生成两条样本：
@@ -147,8 +149,9 @@ Q: Which item has the title: Stanley TRA708T Sharpshooter ...?
 A: <a_42><b_80><c_160>
 ```
 
-> 注意这里只拼接了**前三层**。如果某个 item 因去重多了第 4 层，
-> 对齐任务里的 SID 与主任务 CSV 里的 `item_sid` 会不一致（见第 8 节）。
+> **版本注意**：旧版本只拼接**前三层**（`sids[0] + sids[1] + sids[2]`），
+> 2025-11 之后改成 `''.join(sids)`，**保留全部 token**（包括去重 rank 和新算法追加的身份 token）。
+> 如果你的 SID 只有 3 个 token，两种写法完全等价。
 
 ### 3.2 历史 SID → 标题
 
@@ -305,15 +308,16 @@ sequenceDiagram
 
 ## 8. 读源码时要注意的三个细节
 
-### 8.1 去重 SID 与对齐任务不一致
+### 8.1 去重 SID 与对齐任务的一致性（上游已修）
 
 - 主任务 CSV 的 `item_sid` 可能包含去重附加的 `<d_rank>`；
-- `SidItemFeatDataset` / `RLTitle2SidDataset` 只取前三层；
-- 结果：同一个 item 在"序列→SID"任务里目标是 4 个 token，
-  在"标题→SID"任务里目标是 3 个 token。
+- **旧版本**：`SidItemFeatDataset` / `RLTitle2SidDataset` 只取前三层
+  （`if len(sids) >= 3: sids[0]+sids[1]+sids[2]`）→ 同一个 item 在"序列→SID"任务里目标是 4 个 token，
+  在"标题→SID"任务里目标是 3 个 token，模型看到两套冲突的标签；
+- **现版本**：统一用 `if sids: ''.join(sids)`，两边都保留全部 token，问题消失。
 
-这不会让训练崩，但会让模型看到两套略有冲突的标签。若你要做严格实验，
-可以统一改成"取全部层"或"全部只取前三层"。
+如果你在旧 commit 上做实验，需要自己把这几处改成 `''.join(sids)`；
+在 3-token 数据集上两者行为完全相同，所以这个差异只影响有冲突的数据集。
 
 ### 8.2 `negative_prompt_ids` 是死代码
 
