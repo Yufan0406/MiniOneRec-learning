@@ -86,7 +86,7 @@ def train(
     # train_data = D3Dataset(train_file, category=category_dict[category], sample=sample)
     # train_datasets.append(train_data)
     train_data1 = SidDataset(train_file, category=category_dict[category], sample=sample)
-    train_datasets.append(train_data1)
+    train_datasets.append(train_data1)  # 不同于sidsftdatasets，只会拼接用户输入以及response占位（空出部分用于completion）
     train_data2 = RLTitle2SidDataset(item_file=item_meta_path, index_file=sid_index_path, category=category_dict[category], sample=sample)
     train_datasets.append(train_data2)
     train_data3 = RLSeqTitle2SidDataset(train_file, category=category_dict[category], sample=10000)
@@ -114,6 +114,7 @@ def train(
     # prompt2history = {**train_data.prompt2history, **eval_data.prompt2history}
     # history2target = {**train_data.history2target, **eval_data.history2target}
 
+    # 构造prompt2history和history2target字典，用于将prompt映射到历史记录，以及将历史记录映射到目标completion
     prompt2history = {}
     history2target = {}
     
@@ -153,30 +154,43 @@ def train(
 
     print("Load item_ada_embd successfully.")
 
-    ndcg_rewards = [-1.0/math.log2(i+2) for i in range(num_generations)]
-    ndcg_rewards = [-elm/sum(ndcg_rewards) for elm in ndcg_rewards]
+    ndcg_rewards = [-1.0/math.log2(i+2) for i in range(num_generations)] # 构造排序奖励/惩罚，用于惩罚错误商品；如果错误的completion在前面，则惩罚更大。
+    ndcg_rewards = [-elm/sum(ndcg_rewards) for elm in ndcg_rewards] # 对惩罚进行归一化，使得总惩罚为1，便于与其他奖励函数结合使用。
 
 
     def ndcg_rule_reward(prompts, completions):
+        # 此时prompts对应prompts种类数 * num_generations个completion
+        # 排序奖励/惩罚函数，基于NDCG的思想，惩罚错误的completion在前面出现的情况
         history = [prompt2history[prompt] for prompt in prompts]
-        targets = [history2target[elm] for elm in history]
-        repeat = num_generations
+        targets = [history2target[elm] for elm in history] # 真实的预测目标
+        repeat = num_generations # 一个prompt重复num_generations次生成completion
         rewards = []
         flag = False
-        lis = []
+        lis = [] # 记录预测正确与否的奖励
 
         for i, completion in enumerate(completions):
+            '''
+            包含所有的completion，按顺序排列，长度为num_generations * 不同prompts种类数
+            内部顺序由概率得分决定，对于同一个prompt下的completions，按概率得分从高到低排列。每个prompt对应num_generations个completion。
+            上述的规则由Beam Search的设计决定。
+            completions = [
+                '<a_x><b_x><c_x>\n',
+                '<a_x><b_x><c_y>\n',
+                ...
+            ]
+            '''
 
             if completion.strip("\n\"") == targets[i].strip("\n\""):
-                flag = True
-                lis.append(0.0)
+                flag = True # 标记16个beam中有一个是正确的completion
+                lis.append(0.0) # 正确就不给予惩罚
             else:
-                lis.append(ndcg_rewards[i%num_generations])
+                lis.append(ndcg_rewards[i%num_generations]) # 错误就给予惩罚（每个prompts对应16次生成）
             
-            if (i+1)%num_generations == 0:
-                if flag:
+            if (i+1)%num_generations == 0:  # 判断一个prompt的16个completion是否已经处理完毕
+                if flag: # 如果16个beam中有一个是正确的completion，就将奖励列表lis加入到总奖励列表rewards中
                     rewards.extend(lis)
-                else:
+                    # 正确的completion对应排序奖励为0，而错误的completion对应排序惩罚为负数，表示错误的completion越靠前，惩罚越大。形成分差来打压错误的completion排序。
+                else: # 否则就全部设为0，表明没有正确的completion，不需要额外惩罚打压排序
                     rewards.extend([0.0] * repeat)
                 flag = False
                 lis = []
@@ -184,6 +198,7 @@ def train(
         return rewards
 
     def rule_reward(prompts, completions):
+        # 预测正确与否对应的奖励/惩罚
         history = [prompt2history[prompt] for prompt in prompts]
         targets = [history2target[elm] for elm in history]
         rewards = []
@@ -191,7 +206,7 @@ def train(
         for i, completion in enumerate(completions):
 
             if completion.strip("\n\" ") == targets[i].strip("\n\" "):
-                rewards.append(1.0)
+                rewards.append(1.0) 
             else:
                 rewards.append(0.0)
         return rewards
@@ -260,12 +275,13 @@ def train(
     os.environ['WANDB_PROJECT'] = wandb_project
     os.environ["WANDB_MODE"] = "offline"
 
+    # grpo训练参数设置
     training_args = GRPOConfig(output_dir=output_dir,
                                 save_steps=0.1,
                                 save_total_limit=20,
                                 eval_strategy="steps",
                                 max_completion_length=128,
-                                num_generations=num_generations,
+                                num_generations=num_generations, # 一个问题采样次数
                                 temperature=temperature,
                                 sync_ref_model=sync_ref_model,
                                 per_device_eval_batch_size=eval_batch_size,
@@ -286,13 +302,17 @@ def train(
                                 run_name=wandb_run_name,
                             )
     trainer = ReReTrainer(
+        # 基于GRPO的训练器，继承自transformers.Trainer
+        # 对GRPO代码的改进
         model=model_path,
         base_model=model_path,
         dapo=dapo,
         gspo=gspo,
         add_gt=add_gt,
         dynamic_sampling=dynamic_sampling,
-        beam_search=beam_search,
+        beam_search=beam_search, # 实际传入参数为True
+        # 实际是进行采样后束搜索
+        # 束搜索时会根据概率得分对生成的completions进行排序，选取前num_generations个作为最终的completion
         test_during_training=test_during_training,
         test_beam=test_beam,
         info_file=info_file,

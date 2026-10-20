@@ -100,7 +100,8 @@ Scaling Generative Recommendation**
 | `rq/rqkmeans_plus.sh`                |   Shell script to train RQ-Kmeans+ constrained on Amazon item embeddings                        |
 | `rq/generate_indices_plus.py`                |   Generates the SID file after training an RQ-Kmeans+ model                                       |
 | `rq/generate_indices_plus.sh`                |   Shell script to generate the SID file after training an RQ-Kmeans+ model                                       |
-| `requirements.txt`        | List of Python dependencies                                                                                |
+| `requirements.txt`        | List of Python dependencies (Linux + CUDA 11.8)                                                            |
+| `requirements-macos.txt`  | Trimmed dependency set for local macOS (Apple Silicon) development                                         |
 
 ---
 
@@ -121,6 +122,11 @@ conda activate MiniOneRec
 ```bash
 pip install -r requirements.txt
 ```
+
+> `requirements.txt` is a frozen Linux + CUDA 11.8 environment. On macOS (Apple Silicon) it cannot be installed:
+> `torchrec`/`fbgemm_gpu`/`triton`/`nvidia-*` only publish Linux wheels, and `bitsandbytes` has no macOS wheel before 0.49.0.
+> For local code reading, data processing or small-scale debugging use Python 3.11 and the trimmed set instead:
+> `pip install -r requirements-macos.txt`. Full SFT/RL training still requires Linux + NVIDIA GPUs.
 
 ### 3. SFT
 
@@ -163,6 +169,7 @@ conda activate MiniOneRec
 ```
 pip install -r requirements.txt
 ```
+  On macOS (Apple Silicon) use `pip install -r requirements-macos.txt` instead; see the note in Quickstart.
 
 ### 2. Data Preparation
 

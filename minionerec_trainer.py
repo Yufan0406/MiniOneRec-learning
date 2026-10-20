@@ -482,7 +482,7 @@ class ReReTrainer(Trainer):
                 self.generation_config = GenerationConfig(
                     max_new_tokens=self.max_completion_length,
                     length_penalty=self.length_penalty,
-                    num_beams=self.num_generations,
+                    num_beams=self.num_generations, # 每个prompt对应num_generations个beams
                     num_return_sequences=self.num_generations,
                     pad_token_id=processing_class.pad_token_id,
                     eos_token_id=processing_class.eos_token_id,
@@ -530,46 +530,78 @@ class ReReTrainer(Trainer):
             info = f.readlines()
             # Parse new format: semantic_id \t item_title \t item_id
             semantic_ids = [line.split('\t')[0].strip() + "\n" for line in info]
+            '''
+            semantic_ids = [
+            '<a_x1><b_x2><c_x3>\n',...
+            ]
+            '''
             item_titles = [line.split('\t')[1].strip() + "\n" for line in info if len(line.split('\t')) >= 2]
             
             # Format for tokenization
             info_semantic = [f'''### Response:\n{_}''' for _ in semantic_ids]
+            
+            '''
+            info_semantic = [
+                '### Response:\n<a_x1><b_x2><c_x3>\n',
+            ]
+            '''
+
             info_titles = [f'''### Response:\n{_}''' for _ in item_titles]
 
-            info = info_semantic
+            info = info_semantic # 形成了Response正确结果
 
         # with open(self.info_file, 'r') as f:
         #     info = f.readlines()
         #     info = ["\"" + _[:-len(_.split('\t')[-1])].strip() + "\"\n" for _ in info]
         #     info = [f'''### Response:\n{_}''' for _ in info]
 
-        tokenizer = AutoTokenizer.from_pretrained(self.base_model)
+        tokenizer = AutoTokenizer.from_pretrained(self.base_model) # 使用SFT模型的tokenizer
+
+        # 这里主要是将info中的每一行文本进行tokenization，得到对应的input_ids。
         if self.base_model.lower().find("llama") > -1: 
-            prefixID = [tokenizer(_).input_ids[1:] for _ in info]
+            # 等价于：‘llama’ in self.base_model.lower()
+            prefixID = [tokenizer(_).input_ids[1:] for _ in info] # 主要是不同模型的tokenizer行为不一致，llama系tokenized后会在开头加一个特殊token<s>，去掉即可
         else:
             prefixID = [tokenizer(_).input_ids for _ in info]
-        
+
+        '''
+        IDs用来指代每个部分的tokenized结果，实际上就是多个id元素
+        prefixID = [
+            [IDs('#### Response:\n'), IDs('<a_x1><b_x2><c_x3>\n'), IDs(eos_token)],
+        ]
+        '''
+
+        # 确定前面### Response:\n的token长度
         if self.base_model.lower().find("gpt2") > -1:
-            prefix_index = 4
+            prefix_index = 4 # gpt2会将### Response:\n tokenized为4个token
         else:
             prefix_index = 3
             
         self.hash_dict = dict()
         # sasrec_dict = dict()
         for index, ID in enumerate(prefixID):
-            ID.append(tokenizer.eos_token_id)
+            # 生成前缀表：首先遍历原response + sid语句对应的tokenized结果，得到每个前缀对应的后续token集合
+            ID.append(tokenizer.eos_token_id) # 添加语句结束标记
             for i in range(prefix_index, len(ID)):
-                if i == prefix_index:
-                    hash_number = self.get_hash(ID[:i])
+                if i == prefix_index: # 如果是'###Response:\n'最后一个id（这里对应循环的第一个i）
+                    hash_number = self.get_hash(ID[:i]) # 直接将'###Response:\n'的tokenized结果作为hash_number，中间用'-'连接
                 else:
-                    hash_number = self.get_hash(ID[prefix_index:i])
-                if hash_number not in self.hash_dict:
+                    hash_number = self.get_hash(ID[prefix_index:i]) # 不然去掉‘###Response:\n’ids，保留SID当前层级（后面就是不同层级的码本）
+                if hash_number not in self.hash_dict: 
+                    # 第一次出现前缀时，对应构造一个集合，用来存储其接下来的合法token后缀
                     self.hash_dict[hash_number] = set()
                     # sasrec_dict[hash_number] = set()
                 self.hash_dict[hash_number].add(ID[i])
+                '''
+                实际键为token id所形成的hash，值为该前缀对应的合法token id集合
+                hash_dict = {
+                '#### Response:\n': {<a_x1>, <a_x2>, ...},
+                '<a_x1>': {<b_x1>, <b_x2>, ...},
+                }
+                '''
 
         for key in self.hash_dict.keys():
-            self.hash_dict[key] = list(self.hash_dict[key])
+            self.hash_dict[key] = list(self.hash_dict[key]) # 最后将集合转为list，方便后续使用
 
         self.test_generation_config = GenerationConfig(max_new_tokens=self.max_completion_length,
                                                             length_penalty=self.length_penalty,
@@ -686,10 +718,13 @@ class ReReTrainer(Trainer):
             prompt_ids = prompt_ids[:, -self.max_prompt_length :]
             prompt_mask = prompt_mask[:, -self.max_prompt_length :]
 
+        # 这里就是根据我们的前缀表，对每个prompt的生成结果进行约束，保证生成的结果是合法的
+        # 具体而言，比如当模型收到‘### Response:\n’后，开始预测和输出对应第一层级的码本token时，由于<a_x1>、<b_x1>、<c_x1>等token都位于词典中，所以模型都会输出这些token的概率分布。
+        # 但是由于我们希望模型按规则和我们的前缀表，在第一层级上只合法输出<a_{}>，因此我们就需要在logits上进行约束（比如将不合法的token对应的logits设置为负无穷），保证模型只能输出<a_{}>非零概率，而其他不合法的token的概率为零。这样就能保证模型生成的结果是合法的。
         ccc = ConstrainedLogitsProcessor(
                 # guidance_scale=1.0,
                 # cf_logits=None,
-                prefix_allowed_tokens_fn=self.prefix_allowed_tokens_fn,
+                prefix_allowed_tokens_fn=self.prefix_allowed_tokens_fn, #
                 # cf_dict=sasrec_dict,
                 # unconditional_ids=None,
                 num_beams=self.num_generations if self.beam_search else 1,
